@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Galaxy Defender</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center;
+    background: radial-gradient(ellipse at top, #14204b 0%, #080d25 48%, #03050f 100%);
+    color: #f4f7ff; font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+  }
+  .wrap { width: min(960px, 100%); padding: 18px; }
+  header { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+  h1 { margin:0; font-size:clamp(1.4rem, 4vw, 2.2rem); letter-spacing:2px; color:#8cf7ff; text-shadow:0 0 16px #2eddfb; }
+  .sub { color:#aab8e8; font-size:.9rem; }
+  .hud { display:flex; gap:9px; flex-wrap:wrap; }
+  .stat { background:#111b3be8; border:1px solid #314b88; border-radius:12px; padding:8px 12px; min-width:82px; text-align:center; }
+  .stat span { display:block; font-size:.72rem; color:#9eafd9; text-transform:uppercase; letter-spacing:1px; }
+  .stat strong { font-size:1.12rem; }
+  .gamebox { position:relative; border:1px solid #3859a2; border-radius:16px; overflow:hidden; box-shadow:0 0 32px #1742a44a; background:#05091a; }
+  canvas { display:block; width:100%; height:auto; touch-action:none; }
+  .overlay { position:absolute; inset:0; display:grid; place-items:center; padding:22px; background:#030817c9; text-align:center; }
+  .panel { max-width:440px; background:#101a39ee; border:1px solid #4768b6; border-radius:18px; padding:24px; box-shadow:0 0 32px #22d9ff25; }
+  .panel h2 { margin:0 0 8px; font-size:1.8rem; color:#91f7ff; }
+  .panel p { color:#d0daf8; line-height:1.5; margin:8px 0 18px; }
+  button { cursor:pointer; border:0; border-radius:10px; padding:12px 20px; background:linear-gradient(100deg,#26d8f2,#8276ff); color:#061026; font-weight:800; font-size:1rem; }
+  button:hover { filter:brightness(1.12); transform:translateY(-1px); }
+  .help { display:flex; justify-content:space-between; flex-wrap:wrap; gap:10px; color:#aab8e8; font-size:.85rem; padding:12px 4px 0; }
+  .mobile { display:none; justify-content:center; align-items:center; gap:12px; margin-top:12px; }
+  .mobile button { width:58px; height:48px; padding:0; font-size:1.2rem; background:#182751; color:#e8f8ff; border:1px solid #4768b6; }
+  @media(max-width:600px) { .wrap{padding:10px}.mobile{display:flex}.stat{min-width:68px;padding:6px 8px}.help{font-size:.78rem} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div><h1>🚀 GALAXY DEFENDER</h1><div class="sub">Protege la galaxia. ¡Llega a 10,000 puntos!</div></div>
+    <div class="hud">
+      <div class="stat"><span>Puntos</span><strong id="score">0</strong></div>
+      <div class="stat"><span>Vidas</span><strong id="lives">❤️❤️❤️</strong></div>
+      <div class="stat"><span>Récord</span><strong id="best">0</strong></div>
+    </div>
+  </header>
+  <div class="gamebox">
+    <canvas id="game" width="900" height="560" aria-label="Juego Galaxy Defender"></canvas>
+    <div class="overlay" id="overlay">
+      <div class="panel">
+        <h2 id="overlayTitle">Galaxy Defender</h2>
+        <p id="overlayText">Pilota tu nave, dispara a los meteoritos y esquiva los obstáculos. Consigue <b>10,000 puntos</b> para ganar. ¡Tienes tres vidas!</p>
+        <button id="startBtn">¡COMENZAR!</button>
+      </div>
+    </div>
+  </div>
+  <div class="help">
+    <span>⌨️ Mover: <b>← → ↑ ↓</b> o <b>W A S D</b></span>
+    <span>🔫 Disparar: <b>ESPACIO</b> (destruye naves enemigas: +100)</span>
+    <span>📱 En móvil: usa los botones de abajo y toca DISPARAR</span>
+  </div>
+  <div class="mobile">
+    <button data-key="ArrowLeft" aria-label="Izquierda">◀</button>
+    <button data-key="ArrowUp" aria-label="Arriba">▲</button>
+    <button data-key="ArrowDown" aria-label="Abajo">▼</button>
+    <button data-key="ArrowRight" aria-label="Derecha">▶</button>
+    <button data-key=" " aria-label="Disparar">✦</button>
+  </div>
+</div>
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const scoreEl = document.getElementById('score');
+  const livesEl = document.getElementById('lives');
+  const bestEl = document.getElementById('best');
+  const overlay = document.getElementById('overlay');
+  const overlayTitle = document.getElementById('overlayTitle');
+  const overlayText = document.getElementById('overlayText');
+  const startBtn = document.getElementById('startBtn');
+  const W = canvas.width, H = canvas.height;
+  const keys = new Set();
+  let player, bullets, enemyBullets, enemies, rocks, sparks, stars, score, lives, running, lastTime, spawnTimer, enemySpawnTimer, shotTimer, invulnerable, best;
+  try { best = Number(localStorage.getItem('galaxyDefenderBest') || 0); } catch { best = 0; }
+  bestEl.textContent = best;
+  function reset() {
+    player = { x: W/2, y: H-82, r: 18, speed: 300 };
+    bullets = []; enemyBullets = []; enemies = []; rocks = []; sparks = []; score = 0; lives = 3;
+    spawnTimer = 0; enemySpawnTimer = 1.8; shotTimer = 0; invulnerable = 0; lastTime = 0;
+    stars = Array.from({length:100}, () => ({x:Math.random()*W,y:Math.random()*H,s:Math.random()*2+0.5,v:Math.random()*38+12}));
+    scoreEl.textContent = score; livesEl.textContent = '❤️❤️❤️';
+  }
+  function start() { reset(); running = true; overlay.style.display='none'; requestAnimationFrame(loop); }
+  function end(win) {
+    running = false; overlay.style.display='grid';
+    overlayTitle.textContent = win ? '🌟 ¡MISIÓN CUMPLIDA!' : '💫 FIN DEL JUEGO';
+    overlayText.innerHTML = win
+      ? `¡Excelente piloto! Conseguistes <b>${score} puntos</b> y defendiste la galaxia.`
+      : `Tu nave perdió sus tres vidas. Lograste <b>${score} puntos</b>. ¡Inténtalo de nuevo!`;
+    startBtn.textContent = 'JUGAR OTRA VEZ';
+  }
+  function shoot() {
+    bullets.push({x:player.x,y:player.y-18,r:4,v:470});
+    sparks.push({x:player.x,y:player.y-18,vx:(Math.random()-.5)*30,vy:-60,life:.15,color:'#8dfaff'});
+  }
+  function spawnEnemy() {
+    const x = 45 + Math.random() * (W - 90);
+    enemies.push({x, y:-30, r:19, v:55 + Math.random()*35 + score*.012,
+      phase:Math.random()*6.28, fire:0.8+Math.random()*1.2, hp:2});
+  }
+  function enemyShoot(e) {
+    const dx = player.x-e.x, dy = player.y-e.y, len = Math.hypot(dx,dy)||1;
+    enemyBullets.push({x:e.x,y:e.y+15,vx:dx/len*155,vy:dy/len*155,r:5});
+  }
+  function drawEnemy(e) {
+    ctx.save(); ctx.translate(e.x,e.y); ctx.shadowBlur=15; ctx.shadowColor='#ff3f8b';
+    ctx.fillStyle='#ff477f'; ctx.strokeStyle='#ffb3d0'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(0,21); ctx.lineTo(-23,-5); ctx.lineTo(-10,-3);
+    ctx.lineTo(-5,-17); ctx.lineTo(5,-17); ctx.lineTo(10,-3); ctx.lineTo(23,-5); ctx.closePath();
+    ctx.fill(); ctx.stroke(); ctx.shadowBlur=0;
+    ctx.fillStyle='#fff0f6'; ctx.fillRect(-5,-5,10,5);
+    ctx.fillStyle='#ffae55'; ctx.fillRect(-15,5,6,7); ctx.fillRect(9,5,6,7);
+    ctx.restore();
+  }
+  function spawnRock() {
+    const r = 16 + Math.random()*19;
+    rocks.push({x:r+Math.random()*(W-2*r),y:-r,r,v:90+Math.random()*75+score*.025,rot:Math.random()*6.28,spin:(Math.random()-.5)*2.5,shape:Array.from({length:8},()=>.75+Math.random()*.5),hp:r>29?2:1});
+  }
+  function hit(a,b) { const dx=a.x-b.x,dy=a.y-b.y; return dx*dx+dy*dy < (a.r+b.r)*(a.r+b.r); }
+  function burst(x,y,color,n=12) {
+    for(let i=0;i<n;i++){const a=Math.random()*Math.PI*2,v=40+Math.random()*190;sparks.push({x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v,life:.25+Math.random()*.5,color});}
+  }
+  function drawShip() {
+    ctx.save(); ctx.translate(player.x,player.y);
+    if(invulnerable>0 && Math.floor(invulnerable*18)%2===0) ctx.globalAlpha=.45;
+    ctx.shadowBlur=20;ctx.shadowColor='#38eaff';
+    ctx.fillStyle='#42dff5';ctx.beginPath();ctx.moveTo(0,-23);ctx.lineTo(17,17);ctx.lineTo(5,12);ctx.lineTo(0,18);ctx.lineTo(-5,12);ctx.lineTo(-17,17);ctx.closePath();ctx.fill();
+    ctx.shadowBlur=0;ctx.fillStyle='#e7fbff';ctx.beginPath();ctx.moveTo(0,-13);ctx.lineTo(6,7);ctx.lineTo(-6,7);ctx.closePath();ctx.fill();
+    ctx.fillStyle='#ff8b4a';ctx.beginPath();ctx.moveTo(-6,16);ctx.lineTo(0,28+Math.random()*7);ctx.lineTo(6,16);ctx.fill();
+    ctx.restore();
+  }
+  function drawRock(r) {
+    ctx.save();ctx.translate(r.x,r.y);ctx.rotate(r.rot);ctx.shadowBlur=10;ctx.shadowColor='#ff824a';
+    ctx.fillStyle='#826b79';ctx.strokeStyle='#d9a0a0';ctx.lineWidth=2;ctx.beginPath();
+    r.shape.forEach((p,i)=>{const a=i/r.shape.length*Math.PI*2, x=Math.cos(a)*r.r*p,y=Math.sin(a)*r.r*p;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
+    ctx.closePath();ctx.fill();ctx.stroke();ctx.shadowBlur=0;
+    ctx.fillStyle='#5c4b60';ctx.beginPath();ctx.arc(-r.r*.25,-r.r*.1,r.r*.22,0,Math.PI*2);ctx.fill();ctx.beginPath();ctx.arc(r.r*.3,r.r*.25,r.r*.14,0,Math.PI*2);ctx.fill();ctx.restore();
+  }
+  function draw() {
+    const grad=ctx.createLinearGradient(0,0,0,H);grad.addColorStop(0,'#070d27');grad.addColorStop(1,'#11143a');ctx.fillStyle=grad;ctx.fillRect(0,0,W,H);
+    // distant nebulae
+    ctx.globalAlpha=.12;ctx.fillStyle='#7b55ff';ctx.beginPath();ctx.ellipse(180,180,130,70,-.4,0,Math.PI*2);ctx.fill();ctx.fillStyle='#17c7ee';ctx.beginPath();ctx.ellipse(720,310,160,85,.5,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;
+    stars.forEach(s=>{ctx.fillStyle='#c6e9ff';ctx.globalAlpha=.35+s.s*.2;ctx.fillRect(s.x,s.y,s.s,s.s*1.8);});ctx.globalAlpha=1;
+    bullets.forEach(b=>{ctx.shadowBlur=12;ctx.shadowColor='#7affff';ctx.fillStyle='#c9ffff';ctx.fillRect(b.x-2,b.y-10,4,13);});ctx.shadowBlur=0;
+    enemyBullets.forEach(b=>{ctx.shadowBlur=12;ctx.shadowColor='#ff347d';ctx.fillStyle='#ff6b9d';ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fill();});ctx.shadowBlur=0;
+    enemies.forEach(drawEnemy);
+    rocks.forEach(drawRock);
+    sparks.forEach(p=>{ctx.globalAlpha=Math.max(0,p.life*1.6);ctx.fillStyle=p.color;ctx.fillRect(p.x,p.y,3,3);});ctx.globalAlpha=1;
+    if(player) drawShip();
+    ctx.fillStyle='#8296d8';ctx.font='14px system-ui';ctx.fillText('SECTOR 07  •  ASTEROID FIELD',18,27);
+  }
+  function loop(t) {
+    if(!running)return;
+    const dt=Math.min((t-(lastTime||t))/1000,.035);lastTime=t;
+    stars.forEach(s=>{s.y+=s.v*dt;if(s.y>H){s.y=0;s.x=Math.random()*W;}});
+    let dx=0,dy=0;
+    if(keys.has('ArrowLeft')||keys.has('a')||keys.has('A'))dx--;
+    if(keys.has('ArrowRight')||keys.has('d')||keys.has('D'))dx++;
+    if(keys.has('ArrowUp')||keys.has('w')||keys.has('W'))dy--;
+    if(keys.has('ArrowDown')||keys.has('s')||keys.has('S'))dy++;
+    const len=Math.hypot(dx,dy)||1;player.x+=dx/len*player.speed*dt;player.y+=dy/len*player.speed*dt;
+    player.x=Math.max(24,Math.min(W-24,player.x));player.y=Math.max(35,Math.min(H-30,player.y));
+    shotTimer-=dt;if((keys.has(' ')||keys.has('Space'))&&shotTimer<=0){shoot();shotTimer=.22;}
+    spawnTimer-=dt;if(spawnTimer<=0){spawnRock();spawnTimer=Math.max(.27,.78-score/5000);}
+    enemySpawnTimer-=dt;
+    if(enemySpawnTimer<=0){spawnEnemy();enemySpawnTimer=Math.max(1.25,3.1-score/900);}
+    bullets.forEach(b=>b.y-=b.v*dt);bullets=bullets.filter(b=>b.y>-20);
+    enemyBullets.forEach(b=>{b.x+=b.vx*dt;b.y+=b.vy*dt;});
+    enemyBullets=enemyBullets.filter(b=>b.x>-20&&b.x<W+20&&b.y>-20&&b.y<H+20);
+    enemies.forEach(e=>{
+      e.y+=e.v*dt; e.x+=Math.sin(t/400+e.phase)*70*dt; e.x=Math.max(25,Math.min(W-25,e.x));
+      e.fire-=dt; if(e.fire<=0&&e.y>0&&e.y<H-70){enemyShoot(e);e.fire=1.05+Math.random()*.75;}
+    });
+    rocks.forEach(r=>{r.y+=r.v*dt;r.rot+=r.spin*dt;});
+    // Los disparos del jugador pueden destruir las naves enemigas.
+    for(let i=enemies.length-1;i>=0;i--){
+      const e=enemies[i]; let destroyed=false;
+      for(let j=bullets.length-1;j>=0;j--){
+        if(hit(e,bullets[j])) {
+          bullets.splice(j,1); e.hp--; burst(e.x,e.y,'#ff7cac',5);
+          if(e.hp<=0){burst(e.x,e.y,'#ff4f91',18);enemies.splice(i,1);score+=100;destroyed=true;break;}
+        }
+      }
+      if(destroyed) continue;
+      if(invulnerable<=0&&hit(e,player)){
+        enemies.splice(i,1);burst(e.x,e.y,'#ff4f91',16);lives--;invulnerable=1.5;
+        livesEl.textContent='❤️'.repeat(lives)+'🖤'.repeat(3-lives);
+        if(lives<=0){scoreEl.textContent=score;draw();end(false);return;}
+      } else if(e.y-e.r>H){enemies.splice(i,1);}
+    }
+    // Los disparos enemigos también dañan la nave del jugador.
+    if(invulnerable<=0){
+      for(let i=enemyBullets.length-1;i>=0;i--){
+        if(hit(enemyBullets[i],player)){
+          const b=enemyBullets.splice(i,1)[0];burst(b.x,b.y,'#ff6b9d',8);
+          lives--;invulnerable=1.5;livesEl.textContent='❤️'.repeat(lives)+'🖤'.repeat(3-lives);
+          if(lives<=0){scoreEl.textContent=score;draw();end(false);return;}
+          break;
+        }
+      }
+    }
+    for(let i=rocks.length-1;i>=0;i--){
+      const r=rocks[i];let removed=false;
+      for(let j=bullets.length-1;j>=0;j--){
+        if(hit(r,bullets[j])){bullets.splice(j,1);r.hp--;burst(r.x,r.y,'#ffcb85',4);
+          if(r.hp<=0){burst(r.x,r.y,'#ff925e',16);rocks.splice(i,1);score+=50;removed=true;break;}}
+      }
+      if(removed)continue;
+      if(invulnerable<=0&&hit(r,player)){rocks.splice(i,1);burst(player.x,player.y,'#6cecff',22);lives--;invulnerable=1.5;livesEl.textContent='❤️'.repeat(lives)+'🖤'.repeat(3-lives);if(lives<=0){scoreEl.textContent=score;draw();end(false);return;}}
+      else if(r.y-r.r>H){rocks.splice(i,1);score+=10;}
+    }
+    invulnerable=Math.max(0,invulnerable-dt);
+    sparks.forEach(p=>{p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;});sparks=sparks.filter(p=>p.life>0);
+    scoreEl.textContent=score;
+    if(score>best){best=score;bestEl.textContent=best;try{localStorage.setItem('galaxyDefenderBest',best);}catch{}}
+    draw();
+    if(score>=10000){end(true);return;}
+    requestAnimationFrame(loop);
+  }
+  document.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].includes(e.key))e.preventDefault();keys.add(e.key);});
+  document.addEventListener('keyup',e=>keys.delete(e.key));
+  window.addEventListener('blur',()=>keys.clear());
+  document.querySelectorAll('[data-key]').forEach(btn=>{
+    const k=btn.dataset.key;
+    const down=e=>{e.preventDefault();keys.add(k);};
+    const up=e=>{e.preventDefault();keys.delete(k);};
+    btn.addEventListener('pointerdown',down);btn.addEventListener('pointerup',up);btn.addEventListener('pointerleave',up);btn.addEventListener('pointercancel',up);
+  });
+  startBtn.addEventListener('click',start);
+  reset();draw();
+})();
+</script>
+</body>
+</html>
